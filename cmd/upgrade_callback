@@ -1,0 +1,21 @@
+#!/bin/bash
+# ============================================================
+# 升级后（cmd/upgrade_callback）
+# 新文件已解压、旧 target 已替换；TRIM_PKGVAR / TRIM_PKGETC 中的
+# 用户数据与配置会保留（升级不清空）。做完迁移后重新启动。
+# ============================================================
+set -u
+
+APP_NAME="videohunter"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VAR_DIR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
+ETC_DIR="${TRIM_PKGETC:-/var/apps/${APP_NAME}/etc}"
+
+# 【按应用补充】配置/数据迁移示例：
+# if [ -f "$ETC_DIR/app.json" ] && ! grep -q '"schema"' "$ETC_DIR/app.json"; then
+#   ... 迁移旧格式 ...
+# fi
+
+mkdir -p "$VAR_DIR" "$ETC_DIR" 2>/dev/null || true
+"${SCRIPT_DIR}/main" start
+exit $?

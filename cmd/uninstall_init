@@ -1,0 +1,16 @@
+#!/bin/bash
+# ============================================================
+# 卸载前（cmd/uninstall_init）
+# 时序：应用文件仍在 —— 这是唯一能调用应用代码/脚本的卸载阶段。
+# 必须真正停服务（含子进程），只删 pidfile 不算停。
+# ============================================================
+set -u
+
+APP_NAME="videohunter"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -x "${SCRIPT_DIR}/main" ]; then
+  "${SCRIPT_DIR}/main" stop || true
+fi
+
+exit 0

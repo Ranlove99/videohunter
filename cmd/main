@@ -1,0 +1,214 @@
+#!/bin/bash
+# ============================================================
+# fnOS 运行控制（Python 服务模板）
+# 用法: main start|stop|status|restart
+#   start   后台拉起服务（独立进程组 + pidfile + 就绪等待）
+#   stop    TERM → 等待 20s → KILL（按进程组杀，带走子进程）
+#   status  0=运行中；3=未运行（3 是约定值，不能返回 1）
+#
+# 需要改的只有下面「按应用适配」区块。
+# ============================================================
+set -u
+
+# ==================== 按应用适配 ====================
+APP_NAME="videohunter"           # 必须与 manifest.appname 一致
+APP_MODULE="videohunter"      # python -m <模块>；不用模块方式则改 start_app 的启动行
+APP_ARGS=""                      # 追加参数，如 "--host 0.0.0.0"
+READY_CHECK='[ -S "$APP_DIR/app.sock" ]'   # unix socket 就位即视为就绪（无需外部依赖）
+READY_TIMEOUT=60                 # 就绪等待上限（秒）
+LOG_MAX_KB=5120                  # 日志超过 5MB 自动轮转一份
+SOCK_FILE="app.sock"        # 相对 APP_DIR 的 unix socket（网关模式）；无则留空
+# ====================================================
+
+APP_DIR="${TRIM_APPDEST:-/var/apps/${APP_NAME}/target}"
+VAR_DIR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
+ETC_DIR="${TRIM_PKGETC:-/var/apps/${APP_NAME}/etc}"
+PID_FILE="${VAR_DIR}/app.pid"
+LOG_FILE="${VAR_DIR}/app.log"
+CONFIG_FILE="${ETC_DIR}/app.json"
+
+mkdir -p "$VAR_DIR" "$ETC_DIR" 2>/dev/null || true
+
+log_msg() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG_FILE" 2>/dev/null || true; }
+
+# 失败信息写 TRIM_TEMP_LOGFILE，安装/启动失败时应用中心会展示给用户
+fail() {
+  printf '%s\n' "$1" >"${TRIM_TEMP_LOGFILE:-/dev/null}" 2>/dev/null || true
+  log_msg "ERROR: $1"
+  exit 1
+}
+
+# 优先 fnOS python312 依赖应用，回退系统 python3
+find_python() {
+  local p
+  for p in /var/apps/python312/target/bin/python3 /usr/bin/python3 /usr/local/bin/python3; do
+    [ -x "$p" ] && { printf '%s' "$p"; return 0; }
+  done
+  command -v python3 2>/dev/null || true
+}
+
+SETSID=""
+command -v setsid >/dev/null 2>&1 && SETSID="setsid"
+
+pid_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+
+# pid 复用防护：cmdline 里必须还能看到本应用模块名
+pid_is_app() {
+  local pid="${1:-}"
+  pid_alive "$pid" || return 1
+  if [ -r "/proc/$pid/cmdline" ]; then
+    tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q -e "$APP_MODULE"
+  else
+    ps -p "$pid" -o args= 2>/dev/null | grep -q -e "$APP_MODULE"
+  fi
+}
+
+read_pid() { [ -f "$PID_FILE" ] && head -n 1 "$PID_FILE" 2>/dev/null | tr -d '[:space:]'; }
+
+# pidfile 丢失/被删时的兜底：按「模块名 + 工作目录」双条件匹配，避免误杀
+scan_pid() {
+  local d pid cwd
+  for d in /proc/[0-9]*; do
+    pid="${d#/proc/}"
+    [ -r "$d/cmdline" ] || continue
+    tr '\0' ' ' <"$d/cmdline" 2>/dev/null | grep -q -e "$APP_MODULE" || continue
+    cwd="$(readlink -f "$d/cwd" 2>/dev/null || true)"
+    [ "$cwd" = "$APP_DIR" ] || continue
+    printf '%s' "$pid"
+    return 0
+  done
+  return 1
+}
+
+rotate_log() {
+  [ -f "$LOG_FILE" ] || return 0
+  local kb
+  kb="$(du -k "$LOG_FILE" 2>/dev/null | cut -f1)"
+  if [ "${kb:-0}" -gt "$LOG_MAX_KB" ]; then
+    mv -f "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null || true
+  fi
+  return 0
+}
+
+write_default_config() {
+  [ -f "$CONFIG_FILE" ] && return 0
+  mkdir -p "$ETC_DIR"
+  printf '{\n  "appname": "%s"\n}\n' "$APP_NAME" >"$CONFIG_FILE"
+}
+
+start_app() {
+  local pid py i
+  pid="$(read_pid)"
+  if pid_is_app "$pid"; then
+    log_msg "already running (pid $pid)"
+    return 0
+  fi
+  rm -f "$PID_FILE"
+
+  py="$(find_python)"
+  [ -n "$py" ] || fail "未找到 python3 运行时：请在 manifest 声明 install_dep_apps=python312"
+
+  # app/ 的内容整体解压到 TRIM_APPDEST，所以这里判断 APP_DIR 本身，不是 APP_DIR/app
+  [ -d "$APP_DIR" ] || fail "应用目录缺失：$APP_DIR"
+
+  write_default_config
+  rotate_log
+  # 清掉上次异常退出留下的 socket，否则 bind 会报 Address already in use
+  [ -n "$SOCK_FILE" ] && rm -f "$APP_DIR/$SOCK_FILE" 2>/dev/null
+  log_msg "starting $APP_NAME with $py"
+
+  # 关键点：
+  # 1) subshell + exec + setsid —— 脱离 fnOS 会话进程组，否则会被回收
+  # 2) 工作目录必须是 APP_DIR，否则相对路径导入失败
+  # 3) -u 关掉 stdout 缓冲，日志才实时
+  # 4) ulimit -c 0 —— 无头浏览器偶发崩溃会在工作目录甩出 28MB 的 core 文件，
+  #    NAS 磁盘经不起这么攒，直接关掉核心转储
+  ( cd "$APP_DIR" && ulimit -c 0 2>/dev/null; exec $SETSID "$py" -u -m "$APP_MODULE" $APP_ARGS ) \
+    >>"$LOG_FILE" 2>&1 &
+  pid=$!
+  printf '%s' "$pid" >"$PID_FILE"
+
+  i=0
+  while [ "$i" -lt "$READY_TIMEOUT" ]; do
+    if ! pid_alive "$pid"; then
+      rm -f "$PID_FILE"
+      fail "$APP_NAME 启动失败，日志：$LOG_FILE"
+    fi
+    if [ -n "$READY_CHECK" ]; then
+      if eval "$READY_CHECK" >/dev/null 2>&1; then
+        log_msg "ready"
+        return 0
+      fi
+    elif [ "$i" -ge 2 ]; then
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+
+  # 慢启动应用：进程还活着就不判失败，交给 status 复核
+  if pid_alive "$pid"; then
+    log_msg "start pending: alive but readiness not confirmed in ${READY_TIMEOUT}s"
+    return 0
+  fi
+  fail "$APP_NAME 启动超时，日志：$LOG_FILE"
+}
+
+stop_app() {
+  local pid i
+  pid="$(read_pid)"
+  if ! pid_is_app "$pid"; then
+    pid="$(scan_pid || true)"
+  fi
+  if [ -z "$pid" ]; then
+    rm -f "$PID_FILE"
+    return 0
+  fi
+
+  log_msg "stopping pid $pid"
+  # 负号 = 杀整个进程组（应用拉起的子进程一起走）
+  kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+
+  i=0
+  while pid_alive "$pid" && [ "$i" -lt 20 ]; do
+    sleep 1
+    i=$((i + 1))
+  done
+
+  if pid_alive "$pid"; then
+    log_msg "TERM timeout, sending KILL"
+    kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    sleep 1
+  fi
+  rm -f "$PID_FILE"
+  [ -n "$SOCK_FILE" ] && rm -f "$APP_DIR/$SOCK_FILE" 2>/dev/null
+  log_msg "stopped"
+  return 0
+}
+
+status_app() {
+  local pid
+  pid="$(read_pid)"
+  if pid_is_app "$pid"; then
+    return 0
+  fi
+  pid="$(scan_pid || true)"
+  if [ -n "$pid" ]; then
+    printf '%s' "$pid" >"$PID_FILE"
+    return 0
+  fi
+  rm -f "$PID_FILE"
+  return 1
+}
+
+case "${1:-}" in
+  start)   start_app ;;
+  stop)    stop_app ;;
+  restart) stop_app; start_app ;;
+  status)  status_app && exit 0 || exit 3 ;;
+  *)
+    printf 'Usage: %s start|stop|restart|status\n' "$0" \
+      >"${TRIM_TEMP_LOGFILE:-/dev/null}" 2>/dev/null || true
+    exit 1
+    ;;
+esac

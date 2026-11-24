@@ -1,0 +1,24 @@
+# 忽略第三方运行时（由 scripts/fetch_deps.sh 下载，不进仓库）
+app/vendor/
+
+# 运行时产物
+*.sock
+*.pid
+/core
+core.*
+*.log
+*.tmp
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 打包产物（fpk 超过 GitHub 100MB 单文件限制，请用下载页）
+*.fpk
+*.tgz
+*.zip
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,34 @@
+#!/bin/bash
+# ============================================================
+# 卸载后清理（cmd/uninstall_callback）
+#
+# ⚠️ 时序：应用文件已被删除 —— $APP_DIR 不存在，不能调用任何应用代码。
+#    只能写纯 shell 兜底逻辑。
+#    包内数据（TRIM_PKGVAR 等）由 fnOS 按用户选择清理，无需处理。
+#
+# 典型场景：运行期在【包外】留下了状态（如接管了系统 socket、写过
+# /var/run 下的文件），这里做最后的安全网。
+# ============================================================
+set -u
+
+APP_NAME="videohunter"
+
+# 【按应用补充】包外残留兜底示例 —— 接管外部 socket 的场景：
+#
+# BACKUP="/var/run/xxx.sock.${APP_NAME}-orig"
+# TARGET="/var/run/xxx.sock"
+# alive() {
+#   local code
+#   code="$(curl -s --unix-socket "$1" --max-time 3 -o /dev/null \
+#           -w '%{http_code}' http://localhost/ 2>/dev/null || echo 000)"
+#   [ -n "$code" ] && [ "$code" != "000" ]
+# }
+# if [ -e "$BACKUP" ]; then
+#   if [ -e "$TARGET" ] && alive "$TARGET"; then
+#     :   # 目标路径已有存活监听者：保留备份，绝不覆盖
+#   else
+#     mv -f "$BACKUP" "$TARGET" 2>/dev/null || true
+#   fi
+# fi
+
+exit 0

@@ -1,0 +1,16 @@
+#!/bin/bash
+# ============================================================
+# 配置变更后（cmd/config_callback）
+# 端口 / 监听地址这类参数只有重启才生效 → stop + start。
+# 应用内部热加载的配置不要在这里处理。
+# ============================================================
+set -u
+
+APP_NAME="videohunter"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -x "${SCRIPT_DIR}/main" ]; then
+  "${SCRIPT_DIR}/main" restart || true
+fi
+
+exit 0

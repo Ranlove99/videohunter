@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>视频猎手</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="images/icon_64.png">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <img src="images/icon_64.png" alt="" width="26" height="26">
+    <h1>视频猎手</h1>
+  </div>
+  <div class="topbar-right">
+    <span class="chip" id="diskChip">磁盘 —</span>
+    <span class="chip" id="engineChip">引擎检测中…</span>
+    <button class="btn ghost" id="btnSettings" type="button">设置</button>
+  </div>
+</header>
+
+<main>
+  <section class="card scan-card">
+    <label class="field-label" for="urlInput">目标网址</label>
+    <div class="scan-row">
+      <input id="urlInput" type="text" spellcheck="false" autocomplete="off"
+             placeholder="粘贴视频列表页、专辑页或单个视频页，如 https://www.bilibili.com/video/BV...">
+      <button class="btn primary" id="btnScan" type="button">扫描</button>
+    </div>
+    <div class="hint-row">
+      <label class="switch">
+        <input type="checkbox" id="optBrowser" checked>
+        <span>浏览器渲染（能扫 JS 动态页，稍慢）</span>
+      </label>
+      <label class="inline-field">
+        爬取深度
+        <select id="optDepth">
+          <option value="0">仅当前页</option>
+          <option value="1">1 层</option>
+          <option value="2" selected>2 层</option>
+          <option value="3">3 层</option>
+        </select>
+      </label>
+      <span class="hint" id="dirHint"></span>
+    </div>
+  </section>
+
+  <section class="status-bar" id="scanStatus" hidden>
+    <div class="spinner" id="scanSpinner"></div>
+    <div class="status-text">
+      <strong id="scanStage">准备中</strong>
+      <span id="scanMessage"></span>
+    </div>
+    <button class="btn ghost small" id="btnPauseScan" type="button">暂停</button>
+    <button class="btn ghost small danger" id="btnCancelScan" type="button">停止</button>
+  </section>
+
+  <section class="card" id="resultCard" hidden>
+    <div class="card-head">
+      <div>
+        <h2>扫描结果</h2>
+        <p class="sub" id="resultSummary"></p>
+      </div>
+      <div class="head-actions">
+        <label class="checkline"><input type="checkbox" id="checkAll"> 全选</label>
+        <select id="filterSel">
+          <option value="all">全部</option>
+          <option value="verified">仅已确认</option>
+          <option value="direct">仅直链</option>
+        </select>
+        <button class="btn primary" id="btnDownload" type="button" disabled>下载选中</button>
+      </div>
+    </div>
+    <div class="warn-box" id="warnBox" hidden></div>
+    <ul class="result-list" id="resultList"></ul>
+    <p class="more-hint" id="moreHint" hidden></p>
+  </section>
+
+  <section class="card" id="queueCard">
+    <div class="card-head">
+      <div>
+        <h2>下载队列</h2>
+        <p class="sub" id="queueSummary">暂无任务</p>
+      </div>
+      <div class="head-actions">
+        <button class="btn ghost small" id="btnClear" type="button">清理已完成</button>
+      </div>
+    </div>
+    <ul class="task-list" id="taskList"></ul>
+  </section>
+
+  <section class="card" id="logCard" hidden>
+    <div class="card-head"><h2>运行日志</h2></div>
+    <pre class="log" id="logBox"></pre>
+  </section>
+</main>
+
+<div class="modal" id="settingsModal" hidden>
+  <div class="modal-box">
+    <header class="modal-head">
+      <h2>设置</h2>
+      <button class="btn ghost small" id="btnCloseSettings" type="button">关闭</button>
+    </header>
+    <div class="modal-body">
+      <label class="field-label">下载目录</label>
+      <input id="setDir" type="text" list="dirOptions" placeholder="留空则自动使用共享目录/视频猎手">
+      <datalist id="dirOptions"></datalist>
+      <p class="hint" id="setDirHint"></p>
+
+      <div class="grid2">
+        <div>
+          <label class="field-label">同时下载数</label>
+          <input id="setWorkers" type="number" min="1" max="8">
+        </div>
+        <div>
+          <label class="field-label">画质</label>
+          <select id="setFormat">
+            <option value="bv*+ba/b">最佳画质</option>
+            <option value="bv*[height<=1080]+ba/b">最高 1080p</option>
+            <option value="bv*[height<=720]+ba/b">最高 720p</option>
+            <option value="b[height<=480]/b">最高 480p（省空间）</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div>
+          <label class="field-label">页面请求间隔（毫秒）</label>
+          <input id="setRate" type="number" min="0" max="5000" step="100">
+        </div>
+        <div>
+          <label class="field-label">单次最多校验条数</label>
+          <input id="setMaxVerify" type="number" min="10" max="500" step="10">
+        </div>
+      </div>
+
+      <label class="field-label">Cookie 文件（可选，Netscape 格式）</label>
+      <input id="setCookies" type="text" placeholder="/vol1/1000/xxx/cookies.txt">
+      <p class="hint">需要登录才能看的站点，导出 cookie 填这里。</p>
+
+      <label class="field-label">代理（可选）</label>
+      <input id="setProxy" type="text" placeholder="http://192.168.1.2:7890 或 socks5://192.168.1.2:1080">
+      <p class="hint">扫描、渲染、下载都走这个代理。部分站点在国内网络下被阻断（扫描时会提示「DNS 被污染」或「TLS 握手被重置」），只有填了代理才能访问。</p>
+
+      <div class="engine-row">
+        <span class="hint" id="setEngine">内核状态：—</span>
+        <button class="btn ghost small" id="btnCheckEngine" type="button">重新检测内核</button>
+      </div>
+      <p class="hint" id="setTools">ffmpeg：检测中…</p>
+
+      <label class="switch">
+        <input type="checkbox" id="optImpersonate" checked>
+        <span>伪装 Chrome 指纹（对付按 TLS 指纹拦截的站，返回 403 时值得一试）</span>
+      </label>
+
+      <div class="modal-actions">
+        <button class="btn ghost" id="btnShowLog" type="button">查看日志</button>
+        <button class="btn primary" id="btnSaveSettings" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

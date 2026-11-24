@@ -1,0 +1,15 @@
+appname = videohunter
+version = 1.4.0
+display_name = 视频猎手
+desc = 扫描网页收集全部视频，批量下载到 NAS 共享目录
+source = thirdparty
+platform = x86
+maintainer = self-hosted
+install_dep_apps = python312
+os_min_version = 1.1.3100
+ctl_stop = true
+checkport = false
+disable_authorization_path = true
+desktop_uidir = ui
+desktop_applaunchname = videohunter.main
+changelog = 1.4.0：新增「暂停 / 继续 / 停止」——扫描中可随时暂停挂起、接着扫；点停止立即收尾，并把停止前扫到的视频汇总成可下载列表（全选即可下载）；修复「清理已完成」按钮点了没反应；新增 Chrome TLS 指纹伪装（内置 curl_cffi），专治浏览器能开、程序被 403 或返回空壳的站；内置静态 ffmpeg 7.0.2，HLS 合并与音视频合流不再依赖系统安装

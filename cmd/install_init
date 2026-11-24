@@ -1,0 +1,35 @@
+#!/bin/bash
+# ============================================================
+# 安装前检查（cmd/install_init）
+#
+# ⚠️ 时序：本脚本在应用文件解压【之前】执行。
+#    此时 TRIM_APPDEST 是空的 → 不要检查 vendor/、app/、代码文件，
+#    否则 100% 误拒安装。包完整性校验放 install_callback。
+#
+# 这里只检查「与包内容无关」的外部条件。
+# ============================================================
+set -u
+
+APP_NAME="videohunter"
+
+fail() {
+  printf '%s\n' "$1" >"${TRIM_TEMP_LOGFILE:-/dev/null}" 2>/dev/null || true
+  exit 1
+}
+
+# 1) 运行时探活：install_dep_apps 声明的依赖先于本应用安装，这里应已就位
+find_python() {
+  local p
+  for p in /var/apps/python312/target/bin/python3 /usr/bin/python3 /usr/local/bin/python3; do
+    [ -x "$p" ] && { printf '%s' "$p"; return 0; }
+  done
+  command -v python3 2>/dev/null || true
+}
+[ -n "$(find_python)" ] || fail "未找到 python3 运行时，请确认 python312 依赖应用已安装"
+
+# 2)【按应用补充】外部前置条件示例：
+#    - 需要的端口是否空闲（manifest checkport=true 时应用中心已代查）
+#    - 依赖的系统服务 socket 是否存在
+#    - 是否残留上次异常运行的锁文件/备份文件
+
+exit 0

@@ -1,0 +1,19 @@
+#!/bin/bash
+# ============================================================
+# 升级前（cmd/upgrade_init）
+# 先停旧版本，否则旧进程继续占着端口/socket，新版本起不来。
+# TRIM_OLD_APPVER 可读（旧版本号），需要版本迁移分支时用它。
+# ============================================================
+set -u
+
+APP_NAME="videohunter"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -x "${SCRIPT_DIR}/main" ]; then
+  "${SCRIPT_DIR}/main" stop || true
+fi
+
+# 【按应用补充】不可逆变更前的备份，例如：
+#   cp -a "$TRIM_PKGETC/app.json" "$TRIM_PKGETC/app.json.bak.${TRIM_OLD_APPVER:-old}" 2>/dev/null || true
+
+exit 0

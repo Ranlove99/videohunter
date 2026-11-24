@@ -1,0 +1,51 @@
+#!/bin/bash
+# ============================================================
+# 安装后初始化（cmd/install_callback）
+#
+# 时序：应用文件已解压到 TRIM_APPDEST —— 这里才做包完整性校验、
+#       落默认配置、首次启动。全部操作必须幂等（fnOS 随后可能再调 main start）。
+# ============================================================
+set -u
+
+APP_NAME="videohunter"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="${TRIM_APPDEST:-/var/apps/${APP_NAME}/target}"
+VAR_DIR="${TRIM_PKGVAR:-/var/apps/${APP_NAME}/var}"
+ETC_DIR="${TRIM_PKGETC:-/var/apps/${APP_NAME}/etc}"
+
+fail() {
+  printf '%s\n' "$1" >"${TRIM_TEMP_LOGFILE:-/dev/null}" 2>/dev/null || true
+  exit 1
+}
+
+find_python() {
+  local p
+  for p in /var/apps/python312/target/bin/python3 /usr/bin/python3 /usr/local/bin/python3; do
+    [ -x "$p" ] && { printf '%s' "$p"; return 0; }
+  done
+  command -v python3 2>/dev/null || true
+}
+
+# 1) 包完整性：app/ 的内容解压到 APP_DIR 本身（注意不是 APP_DIR/app）
+[ -d "$APP_DIR" ] || fail "安装包不完整：缺少 $APP_DIR"
+[ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ] || fail "安装包不完整：$APP_DIR 为空"
+
+# 2) 内置依赖导入自检：-S 屏蔽系统 site-packages，验证 vendor 自给自足
+#    未使用 app/vendor 的应用把 VENDOR_MODULE 留空即跳过
+VENDOR_MODULE="yt_dlp"
+if [ -n "$VENDOR_MODULE" ] && [ -d "$APP_DIR/vendor" ]; then
+  PY="$(find_python)"
+  [ -n "$PY" ] || fail "未找到 python3 运行时"
+  "$PY" -S - "$APP_DIR/vendor" "$VENDOR_MODULE" <<'PY' || fail "内置依赖导入失败，安装包可能损坏"
+import sys
+sys.path.insert(0, sys.argv[1])
+__import__(sys.argv[2])
+PY
+fi
+
+# 3) 目录与默认配置（幂等）
+mkdir -p "$VAR_DIR" "$ETC_DIR" 2>/dev/null || true
+
+# 4) 首次启动
+"${SCRIPT_DIR}/main" start
+exit $?
